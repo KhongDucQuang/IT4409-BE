@@ -187,9 +187,19 @@ router.delete('/:boardId', [checkBoardMembership, checkBoardAdmin], async (req, 
 });
 
 // Mời user vào board
+// Chỉ cần thay thế route POST /:boardId/members trong file api/boards.ts
+
+// Mời user vào board
+// Chỉ cần thay thế route POST /:boardId/members trong file api/boards.ts
+
+// Mời user vào board
+// Chỉ cần thay thế route POST /:boardId/members trong file api/boards.ts
+
+// Mời user vào board
 router.post('/:boardId/members', [checkBoardMembership, checkBoardAdmin], async (req, res) => {
   const { boardId } = req.params;
   const { email } = req.body;
+  const senderId = req.user!.id; // User A đang mời
 
   if (!email) {
     return res.status(400).json({ message: 'Email là bắt buộc' });
@@ -202,10 +212,21 @@ router.post('/:boardId/members', [checkBoardMembership, checkBoardAdmin], async 
     }
     
     // Kiểm tra xem user có phải chính mình không
-    if (userToInvite.id === req.user!.id) {
-        return res.status(400).json({ message: 'Bạn không thể tự mời chính mình' });
+    if (userToInvite.id === senderId) {
+      return res.status(400).json({ message: 'Bạn không thể tự mời chính mình' });
     }
 
+    // Lấy thông tin board và sender
+    const [board, sender] = await Promise.all([
+      prisma.board.findUnique({ where: { id: boardId } }),
+      prisma.user.findUnique({ where: { id: senderId } })
+    ]);
+
+    if (!board || !sender) {
+      return res.status(404).json({ message: 'Không tìm thấy board hoặc người gửi' });
+    }
+
+    // Tạo member mới
     const newMember = await prisma.boardMember.create({
       data: {
         boardId,
@@ -213,13 +234,51 @@ router.post('/:boardId/members', [checkBoardMembership, checkBoardAdmin], async 
         role: 'MEMBER',
       },
     });
-    res.status(201).json(newMember);
-  } catch (e) {
-    // Giả định lỗi do unique constraint
-    res.status(409).json({ message: 'Người dùng đã ở trong board' });
+
+    // 🔥 TẠO NOTIFICATION TRONG DATABASE
+    const notification = await prisma.notification.create({
+      data: {
+        content: `${sender.name} đã mời bạn vào board "${board.title}"`,
+        recipientId: userToInvite.id,
+        senderId: senderId,
+        boardId: boardId,
+        isRead: false,
+      },
+      include: {
+        sender: { select: { id: true, name: true, avatarUrl: true } },
+        board: { select: { id: true, title: true } },
+      }
+    });
+
+    // 🚀 GỬI THÔNG BÁO QUA SOCKET REAL-TIME (Không block response)
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        io.to(userToInvite.id).emit('BE_NEW_NOTIFICATION', {
+          notification: notification,
+          recipientId: userToInvite.id
+        });
+        console.log(`✅ Đã gửi notification socket tới user: ${userToInvite.id}`);
+      }
+    } catch (socketError) {
+      // Log lỗi socket nhưng không fail request
+      console.error('⚠️ Lỗi gửi socket notification:', socketError);
+    }
+
+    // Trả về response thành công
+    return res.status(201).json({
+      member: newMember,
+      notification: notification
+    });
+  } catch (e: any) {
+    console.error('Lỗi mời user:', e);
+    // Kiểm tra lỗi unique constraint
+    if (e.code === 'P2002') {
+      return res.status(409).json({ message: 'Người dùng đã ở trong board' });
+    }
+    res.status(500).json({ message: 'Lỗi mời người dùng vào board' });
   }
 });
-
 // === API CHO LABELS ===
 
 // POST /api/boards/:boardId/labels - Tạo label mới cho board
