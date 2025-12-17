@@ -448,7 +448,7 @@ router.put('/:boardId/move_card', checkBoardMembership, async (req, res) => {
     // Logic tối ưu: Chỉ cập nhật những gì cần thiết.
     // Nhưng để đơn giản và tránh lỗi: Ta sẽ cập nhật lại position cho TOÀN BỘ card trong các cột bị ảnh hưởng.
     
-    const updatePromises = [];
+    const updatePromises: any[] = [];
 
     // Cập nhật cột mới (hoặc cột hiện tại nếu không đổi cột)
     if (nextCardOrderIds && nextCardOrderIds.length > 0) {
