@@ -339,12 +339,13 @@ router.post('/:cardId/comments', checkCardPermission, async (req, res) => {
         const mentionedUsers = await prisma.user.findMany({
           where: {
             name: {
-              in: uniqueUsernames,
+              in: uniqueUsernames as string[],
               mode: 'insensitive' // Tìm kiếm không phân biệt chữ hoa/thường
             }
           },
           select: { id: true, name: true }
         });
+        const senderUser = (req as any).user;
 
         for (const mentionedUser of mentionedUsers) {
           // Tránh gửi thông báo cho chính người đã comment
