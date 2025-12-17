@@ -1,10 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import { createServer } from 'http'; 
-import { Server } from 'socket.io';  
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 
-// Import các router đã tạo
+// Import các router
 import authRouter from './api/auth';
 import boardsRouter from './api/boards';
 import listsRouter from './api/lists';
@@ -21,23 +21,40 @@ import { authenticateToken } from './middlewares/auth';
 
 const app = express();
 
-// Tạo HTTP Server từ Express App
+// Tạo HTTP Server
 const httpServer = createServer(app);
 
-// Cấu hình Socket.IO
+// --- CẤU HÌNH DANH SÁCH TÊN MIỀN ĐƯỢC PHÉP (WHITELIST) ---
+const whitelist = [
+  'http://localhost:5173',                // Cho phép chạy Local
+  'https://it4409-trello.vercel.app',     // Cho phép Vercel chính
+  'https://it4409-trello.vercel.app/'     // (Dự phòng)
+];
+
+// 1. Cấu hình Socket.IO với whitelist
 const io = new Server(httpServer, {
   cors: {
-    origin: 'http://localhost:5173', 
+    origin: whitelist, // Socket.IO nhận mảng whitelist trực tiếp
     methods: ['GET', 'POST'],
     credentials: true
   }
 });
 
-// Middleware CORS cho Express
-app.use(cors({
-  origin: 'http://localhost:5173',
+// 2. Cấu hình CORS cho Express API
+const corsOptions = {
+  origin: function (origin: any, callback: any) {
+    // Cho phép request từ whitelist HOẶC không có origin (như Postman, server-to-server)
+    if (!origin || whitelist.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.error(`Blocked by CORS: ${origin}`); // Log ra để dễ debug nếu lỗi
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-}));
+};
+
+app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
@@ -46,19 +63,16 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  // Join vào Board (Room) - Khi người dùng xem một board cụ thể
   socket.on('join_board', (boardId) => {
     socket.join(boardId);
     console.log(`[SERVER] User ${socket.id} đã Join Room: ${boardId}`);
   });
 
-  // Join User Room - Để nhận thông báo cá nhân
   socket.on('join_user_room', (userId) => {
     socket.join(userId);
     console.log(`User ${socket.id} joined user room: ${userId}`);
   });
 
-  // Xử lý sự kiện Update Board (Kéo thả, sửa tên, comment...)
   socket.on('FE_UPDATE_BOARD', (data) => {
     const { boardId } = data;
     console.log(`[SERVER] Nhận FE_UPDATE_BOARD từ ${socket.id} -> Room: ${boardId}`);
@@ -77,7 +91,6 @@ io.on('connection', (socket) => {
 
   socket.on('FE_SEND_NOTIFICATION', (data) => {
     const { recipientId } = data;
-    // Gửi riêng cho người nhận
     socket.to(recipientId).emit('BE_NEW_NOTIFICATION', data);
   });
 
@@ -88,6 +101,7 @@ io.on('connection', (socket) => {
 
 app.set('socketio', io);
 
+// Routes
 app.use('/api/auth', authRouter);
 app.use('/api/boards', authenticateToken, boardsRouter);
 app.use('/api/lists', authenticateToken, listsRouter);
@@ -104,4 +118,5 @@ const PORT = process.env.PORT || 3000;
 
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  console.log(`Allowed CORS Origins:`, whitelist);
 });
